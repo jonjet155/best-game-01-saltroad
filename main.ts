@@ -1,0 +1,46 @@
+// SALTROAD — "the road is the game"
+// A salt caravan crosses the desert at dawn. The caravan keeps moving and
+// you win by REACHING the far city at the end of leg 7 — after beating the
+// Raider Chief who blocks the road there. No fixed base, no waves to
+// survive: guide and guard a moving caravan, clear the road ahead of it,
+// and draft one upgrade at each outfitter's camp between legs.
+//
+// The program hands the entry in: it copies this repository's game/ and
+// screenshots/ into the grader's output directory and writes dossier.json,
+// the summary the judge reads, with the vendored make.fun library. It uses
+// only the Node standard library, writes no timestamps and reads no clock,
+// so two runs in a fresh container write byte-identical output.
+//
+// Serve it locally with `node serve.ts`, then open http://localhost:8080.
+// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
+//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { buildDossier } from './vendor/makefun-game.ts';
+
+const here = fileURLToPath(new URL('.', import.meta.url));
+const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+mkdirSync(out, { recursive: true });
+cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
+mkdirSync(join(out, 'screenshots'), { recursive: true });
+if (existsSync(join(here, 'screenshots'))) {
+  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+}
+
+// The scorer's caps from the kit (reference/gate.json): the text cap shapes
+// the dossier bytes; the other caps refuse an entry the scorer would refuse
+// (more than 4 screenshots or one over 256 KiB; more than 993 files in game/
+// or 48 MiB of game files in all; a path under game/ over 1000 bytes).
+writeFileSync(
+  join(out, 'dossier.json'),
+  buildDossier(out, {
+    text_max_bytes: 163840,
+    screenshots: { max: 4, max_bytes: 262144 },
+    game_max_files: 993,
+    game_max_bytes: 50331648,
+    game_path_max_bytes: 1000,
+  }),
+);
