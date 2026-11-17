@@ -1,6 +1,7 @@
-// Seeded randomness: the whole game runs on this generator, never on
-// Math.random, so a fixed seed replays the same legs, the same hazards,
-// the same screenshots — every run, every machine.
+// Seeded randomness: the whole simulation runs on this generator, never
+// on Math.random, so a fixed seed replays the same legs, the same hazards,
+// the same screenshots — every run, every machine. (Audio noise is
+// cosmetic only, outside the simulation, so it may use Math.random.)
 export function createRandom(seed) {
   let a = (seed >>> 0) || 1;
   return {

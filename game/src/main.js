@@ -28,7 +28,6 @@ const world = createWorld(createRandom(seed));
 const renderer = createRenderer(canvas);
 const input = createInput(canvas);
 const audio = createAudio();
-input.setViewport(1, 0, 0);
 
 function readBest() {
   try {

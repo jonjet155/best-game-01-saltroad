@@ -39,6 +39,8 @@ export function createAudio() {
     osc.stop(t0 + dur + 0.02);
   }
 
+  // Cosmetic noise only — it never touches game state, so plain
+  // Math.random is fine here; the simulation itself is fully seeded.
   function noise(dur, vol, cutoff) {
     if (!ctx || !master || muted) return;
     const t0 = ctx.currentTime;

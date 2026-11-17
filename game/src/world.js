@@ -124,15 +124,7 @@ export function createWorld(rng) {
     bannerTimer: 0,
     loseReason: '',
     result: null,
-  };
-}
-
-function freshUpgrades() {
-  return {
-    maxHpBonus: 0, healNow: 0, speedMult: 1, cannonDamage: 0, cannonRadius: 0,
-    guardDamage: 0, hornCut: 0, saltBonus: 0, saltNow: 0, armorMult: 1,
-    shotDamage: 0, shotRange: 0, supplyNow: 0, drainMult: 1,
-    ballista: false, condenser: false,
+    resultTimer: 0, // input ignored this long after entering win/lose
   };
 }
 
@@ -141,7 +133,6 @@ export function startGame(world) {
   const rng = world.rng;
   const fresh = createWorld(rng);
   Object.assign(world, fresh, { best, rng });
-  world.upgrades = freshUpgrades();
   world.screen = SCREEN_PLAY;
   startLeg(world, 1, null);
 }
@@ -198,7 +189,9 @@ function offerUpgrades(world) {
     const i = Math.floor(world.rng.next() * pool.length);
     options.push(pool.splice(i, 1)[0]);
   }
-  while (options.length < 3) options.push(UPGRADES[11]);
+  // No filler: max 6 camps x 1 pick from 12 upgrades leaves the pool at 6+,
+  // so the draft always fills — padding with a duplicate card would only
+  // offer the same upgrade twice.
   world.upgradeOptions = options;
   world.campPhase = 'upgrade';
 }
@@ -243,11 +236,26 @@ export function buyTrade(world, index, audio) {
     addFloat(world, cx, cy, `NEED ${trade.cost} SALT`, '#f87171');
     return;
   }
-  if (trade.id === 'scout' && world.companions.scout) return;
-  if (trade.id === 'healer' && world.companions.healer) return;
-  if (trade.id === 'captain' && world.companions.captain) return;
-  if (trade.id === 'guard' && world.guards.length >= 4) return;
-  if (trade.id === 'wagon' && world.caravan.wagons.length >= 4) return;
+  if (trade.id === 'scout' && world.companions.scout) {
+    addFloat(world, cx, cy, 'SCOUT ALREADY HIRED', '#fde68a');
+    return;
+  }
+  if (trade.id === 'healer' && world.companions.healer) {
+    addFloat(world, cx, cy, 'HEALER ALREADY HIRED', '#fde68a');
+    return;
+  }
+  if (trade.id === 'captain' && world.companions.captain) {
+    addFloat(world, cx, cy, 'CAPTAIN ALREADY HIRED', '#fde68a');
+    return;
+  }
+  if (trade.id === 'guard' && world.guards.length >= 4) {
+    addFloat(world, cx, cy, 'GUARDS MAXED', '#fde68a');
+    return;
+  }
+  if (trade.id === 'wagon' && world.caravan.wagons.length >= 4) {
+    addFloat(world, cx, cy, 'WAGONS MAXED', '#fde68a');
+    return;
+  }
   world.salt -= trade.cost;
   if (trade.id === 'water') {
     world.water = Math.min(WATER_MAX, world.water + 25);
@@ -299,6 +307,7 @@ function breakStreak(world) {
 
 function winGame(world, audio) {
   world.screen = SCREEN_WIN;
+  world.resultTimer = 1; // results stay readable: no instant restart on a stray click
   world.result = {
     score: world.score, kills: world.kills, legs: LEGS,
     salt: world.saltEarned, best: Math.max(world.best, world.score),
@@ -310,6 +319,7 @@ function winGame(world, audio) {
 
 function loseGame(world, audio, reason) {
   world.screen = SCREEN_LOSE;
+  world.resultTimer = 1; // results stay readable: no instant restart on a stray click
   world.loseReason = reason;
   world.result = {
     score: world.score, kills: world.kills, legs: world.legsDone,
@@ -321,6 +331,10 @@ function loseGame(world, audio, reason) {
 }
 
 function killHazard(world, h, audio) {
+  // The dead hazard leaves the road at once: a corpse must not be
+  // re-killed for score, keep damaging the hull, or keep summoning.
+  const i = world.hazards.indexOf(h);
+  if (i >= 0) world.hazards.splice(i, 1);
   world.kills += 1;
   world.chain += 1;
   world.chainTimer = 2.5;
@@ -490,6 +504,15 @@ function blowHorn(world, audio) {
   if (audio) audio.horn();
 }
 
+// Guard riding lanes, spread by roster index so guards 3-4 don't stack
+// on the same lane as guard 2: -46 / +46 / -92 / +92, alternating outward.
+function guardLane(world, g) {
+  const lanes = [-46, 46, -92, 92];
+  const i = world.guards.indexOf(g);
+  if (i >= 0 && i < lanes.length) return lanes[i];
+  return i % 2 === 0 ? -46 : 46;
+}
+
 function updateGuards(world, audio, dt) {
   for (const g of world.guards) {
     if (g.state === 'charge' && g.target) {
@@ -508,7 +531,7 @@ function updateGuards(world, audio, dt) {
       }
     } else if (g.state === 'return') {
       const hx = world.caravan.x - 90;
-      const hy = world.caravan.y + (g === world.guards[0] ? -46 : 46);
+      const hy = world.caravan.y + guardLane(world, g);
       const dx = hx - g.x;
       const dy = hy - g.y;
       const d = Math.hypot(dx, dy) || 1;
@@ -518,7 +541,7 @@ function updateGuards(world, audio, dt) {
     } else {
       // Ride alongside the caravan, bobbing with the road.
       g.x = world.caravan.x - 90;
-      g.y = world.caravan.y + (g === world.guards[0] ? -46 : 46) + Math.sin(world.time * 6 + (g === world.guards[0] ? 0 : 2)) * 3;
+      g.y = world.caravan.y + guardLane(world, g) + Math.sin(world.time * 6 + world.guards.indexOf(g) * 2) * 3;
     }
   }
 }
@@ -570,7 +593,10 @@ function updatePlay(world, input, audio, dt) {
   if (world.weather === 'heat') {
     const drain = HEAT_DRAIN_PER_SEC * (hasWagon(world.caravan, 'water') ? 0.5 : 1.5);
     world.water = Math.max(0, world.water - drain * dt);
-    if (world.water <= 0) hullDamage(world, THIRST_HULL_PER_SEC * dt, audio);
+    if (world.water <= 0) {
+      hullDamage(world, THIRST_HULL_PER_SEC * dt, audio);
+      if (world.screen !== SCREEN_PLAY) return; // thirst death must not be overwritten by a win below
+    }
   } else if (world.weather === 'rain') {
     world.water = Math.min(WATER_MAX, world.water + RAIN_RATE * dt);
     world.caravan.hp = Math.min(world.caravan.maxHp, world.caravan.hp + 0.5 * dt);
@@ -726,7 +752,9 @@ function updatePlay(world, input, audio, dt) {
       }
     }
     // Boss summons: the chief calls raiders, the tyrant calls wisps.
-    if ((h.kind === 'chief' || h.kind === 'tyrant') && world.hazards.includes(h)) {
+    // A boss at 0 HP is already out of world.hazards (killHazard splices
+    // it); the hp check is belt-and-braces so a dead boss never summons.
+    if ((h.kind === 'chief' || h.kind === 'tyrant') && h.hp > 0 && world.hazards.includes(h)) {
       if (h.kind === 'chief' && h.spearCooldown <= 0) {
         h.spearCooldown = 2.4;
         const target = w.down ? world.caravan : (world.rng.chance(0.5) ? w : world.caravan);
@@ -847,7 +875,9 @@ function updatePlay(world, input, audio, dt) {
   }
 
   // Leg complete (non-boss legs): the outfitter's camp, then the next leg.
-  if (!world.bossFight && world.distance >= world.legLength) {
+  // Screen-guarded: a death earlier in this step (thirst, storm, spear)
+  // must never be overwritten by a win or a camp here.
+  if (world.screen === SCREEN_PLAY && !world.bossFight && world.distance >= world.legLength) {
     world.legsDone = world.leg;
     const bonus = 500 + world.leg * 100;
     world.score += bonus;
@@ -878,6 +908,12 @@ export function update(world, input, audio, dt) {
     return;
   }
   if (world.screen === SCREEN_WIN || world.screen === SCREEN_LOSE) {
+    // Results stay on screen ~1 s: a click that killed the boss must not
+    // instantly restart and skip the results unseen.
+    if (world.resultTimer > 0) {
+      world.resultTimer -= dt;
+      return;
+    }
     if (input.pressed('Enter') || input.pressed('Space') || input.mouse.clicked) {
       if (audio) audio.ensure();
       startGame(world);
